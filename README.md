@@ -1,97 +1,175 @@
-# any-mcp
+# anytwo-mcp
 
-A local MCP server that lets Claude read and write your **Any** (Anytwo
-backend) database through its HTTP API at `http://127.0.0.1:7001/v1`.
+A local [MCP](https://modelcontextprotocol.io) server that lets Claude read and
+write your **Any** database (the new backend behind Anytwo) through Any's HTTP
+API on `http://127.0.0.1:7001/v1`.
 
-This is a plain Node.js stdio MCP server. It only talks to your own
-machine's loopback address — nothing here uploads your data anywhere.
+It is a single-file Node.js stdio server (`index.js`). It only talks to your own
+machine's loopback address, so your data never leaves your computer.
 
-## What it can do
+> This is for **Any** (docs.any.org), not the original Anytype app. The existing
+> `@anyproto/anytype-mcp` server targets Anytype's API and will not work against
+> Any, and this one will not work against Anytype.
 
-Tools exposed to Claude:
+## What you need
 
-- `any_health` — check the server is up
-- `any_list_spaces`, `any_create_space`, `any_get_space`
-- `any_create_object`, `any_get_object`, `any_delete_object`, `any_query_objects`
-- `any_search` — full-text/hybrid search
-- `any_read_markdown`, `any_write_markdown`, `any_append_markdown` — read/edit note content
-- `any_list_types` — see what object types exist in a space
+- **Node.js 18 or newer** (it uses the built-in `fetch`). Check with `node --version`.
+- **Any, installed and initialized.** Follow the quickstart at
+  https://docs.any.org/ (`any init`, then `any run`). Keep the 12-word recovery
+  phrase that `any init` prints; it is the only way to restore the account.
+- **Claude Desktop**, or any other MCP client that can launch a local stdio server.
 
-This is a reasonable starting set (spaces, objects, search, editor content).
-It does **not** cover chat, files, ACL/sharing, or agent/bao config — those
-can be added the same way if you want them later.
+## Install
 
-## Requirements
-
-- Node.js 18+ (uses the built-in `fetch`)
-- `any` installed and initialized (see `any init` / `any run` from the
-  Anytwo quickstart)
-
-## Setup
-
-1. Unzip/copy this folder somewhere permanent, e.g. `~/mcp-servers/any-mcp`.
-2. Install dependencies:
+1. **Get the code.**
 
    ```sh
-   cd ~/mcp-servers/any-mcp
+   git clone https://github.com/Perlsowisdom/anytwo-mcp.git
+   cd anytwo-mcp
+   ```
+
+2. **Install dependencies.**
+
+   ```sh
    npm install
    ```
 
-3. Make sure `any` is running in the background:
+3. **Start Any** in its own terminal window and leave it running:
 
    ```sh
-   any run &
-   until any status >/dev/null 2>&1; do sleep 0.2; done
+   any run
    ```
 
-4. Add it to your Claude Desktop config
-   (`~/Library/Application Support/Claude/claude_desktop_config.json` on
-   macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+   In another terminal, confirm it is up:
+
+   ```sh
+   any status
+   ```
+
+4. **Find the full path to Node and to `index.js`.** Claude Desktop does not
+   always see your shell's PATH, so use full paths.
+
+   - Windows: `where node` (for example `C:\Program Files\nodejs\node.exe`)
+   - macOS / Linux: `which node`
+
+5. **Add the server to your Claude Desktop config.**
+
+   | OS | Config file |
+   | --- | --- |
+   | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+   | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+
+   Add an `any` entry **inside the existing top-level `mcpServers` object**,
+   next to any servers you already have:
+
+   Windows (backslashes must be doubled in JSON):
 
    ```json
    {
      "mcpServers": {
        "any": {
-         "command": "node",
-         "args": ["/absolute/path/to/any-mcp/index.js"]
+         "command": "C:\\Program Files\\nodejs\\node.exe",
+         "args": ["C:\\Users\\YOU\\path\\to\\anytwo-mcp\\index.js"]
        }
      }
    }
    ```
 
-5. Restart Claude Desktop. You should see "any" listed under connected
-   MCP servers, with the tools above available.
+   macOS / Linux:
 
-### Optional: point at a different port/host
+   ```json
+   {
+     "mcpServers": {
+       "any": {
+         "command": "/usr/local/bin/node",
+         "args": ["/Users/YOU/path/to/anytwo-mcp/index.js"]
+       }
+     }
+   }
+   ```
 
-If your `any` server isn't on the default `127.0.0.1:7001`, set an env var
-in the config:
+   There must be only one `mcpServers` key in the file. Putting a second
+   `"mcpServers"` inside the first is a common mistake, and Claude Desktop then
+   silently ignores the server.
+
+6. **Fully quit and reopen Claude Desktop.** Closing the window is not enough;
+   quit from the system tray or menu bar.
+
+7. **Check it works.** In a new chat, ask Claude to run `any_health`, or to
+   list your Any spaces. If `any run` is going, you should get a response.
+
+### Using a different host or port
+
+If Any is not on `127.0.0.1:7001`, set `ANY_API_URL` in the same config entry:
 
 ```json
-{
-  "mcpServers": {
-    "any": {
-      "command": "node",
-      "args": ["/absolute/path/to/any-mcp/index.js"],
-      "env": { "ANY_API_URL": "http://127.0.0.1:7001/v1" }
-    }
-  }
+"any": {
+  "command": "node",
+  "args": ["/path/to/anytwo-mcp/index.js"],
+  "env": { "ANY_API_URL": "http://127.0.0.1:7001/v1" }
 }
 ```
 
+## Authentication
+
+There is no API key or token, and none appears in this code. Any's HTTP API
+listens only on loopback, and your identity is the local wallet that
+`any init` created. Anything that can reach `127.0.0.1:7001` on your machine is
+trusted, so:
+
+- Do not expose port 7001 beyond localhost.
+- If you point `ANY_API_URL` at a remote host, nothing here protects that traffic.
+- If Any later adds tokens, they would go in the request helper in `index.js`
+  and should be read from an environment variable, never hard-coded.
+
+## Tools
+
+Each tool is a thin wrapper over one Any HTTP endpoint.
+
+| Tool | Request |
+| --- | --- |
+| `any_health` | `GET /health` |
+| `any_list_spaces` | `GET /spaces` (optionally `?status=all`) |
+| `any_create_space` | `POST /spaces` |
+| `any_get_space` | `GET /spaces/{spaceId}` |
+| `any_list_types` | `GET /spaces/{spaceId}/types` |
+| `any_create_object` | `POST /spaces/{spaceId}/objects` |
+| `any_get_object` | `GET /spaces/{spaceId}/objects/{objectId}` |
+| `any_delete_object` | `DELETE /spaces/{spaceId}/objects/{objectId}` |
+| `any_query_objects` | `POST /spaces/{spaceId}/objects/query` |
+| `any_search` | `POST /spaces/{spaceId}/search` |
+| `any_read_markdown` | `GET /spaces/{spaceId}/objects/{objectId}/editor/{collection}/markdown` |
+| `any_write_markdown` | `PUT` the same path (replaces the body) |
+| `any_append_markdown` | `POST` the same path plus `/append` |
+
+Creating a page is two steps: `any_create_object` makes the object and returns
+its ID, then `any_write_markdown` or `any_append_markdown` fills in the body.
+
+Not covered yet: chat, files, sharing/ACL, and agent (Bao) configuration. They
+can be added the same way, one `tool(...)` block each in `index.js`.
+
+## Troubleshooting
+
+- **`any` doesn't show up in Claude Desktop.** Check, in order: the config is
+  valid JSON with a single `mcpServers` key; the `args` path is the absolute path
+  to `index.js`; you ran `npm install` in this folder; you fully quit and
+  reopened Claude Desktop. Running `node index.js` in a terminal should sit
+  silently waiting for input; if it prints an error and exits, that error is the
+  problem. Claude Desktop's logs are in `%APPDATA%\Claude\logs` on Windows and
+  `~/Library/Logs/Claude` on macOS.
+- **"Could not reach any at ..."** means Any is not running or is on another
+  port. Start `any run`, check `any status`, and set `ANY_API_URL` if needed.
+- **An API error such as `any API error 404 ...`** usually means an endpoint
+  changed. Compare `index.js` with https://docs.any.org/reference/http-api.html.
+
 ## Notes
 
-- `any_create_object` defaults `type` to `"page"` (the plain document type)
-  and lets you pass either a simple `name` or a full `initialProperties` map.
-- Deletes are real offline-first tombstones, not just a UI hide — the
-  `any_delete_object` tool will actually remove the object.
-- The any HTTP API and this wrapper are both a moving target (any is a
-  developer preview). If an endpoint's shape changes, check
-  `https://docs.any.org/reference/http-api.html` and update `index.js`
-  accordingly — it's a plain single-file server, easy to extend.
+- `any_create_object` defaults `type` to `"page"` and accepts either a simple
+  `name` or a full `initialProperties` map such as `{"any": {"name": "Dune"}}`.
+- Deletes are real tombstones, not a UI hide. `any_delete_object` removes the object.
 
 ## Status
 
-Early and untested against a live server. The tool shapes were written from the
-HTTP API reference at https://docs.any.org/reference/http-api.html, and Any is a
-developer preview, so endpoints may change. Issues and PRs welcome.
+Early and untested against a live Any server. The tools were written from the
+HTTP API reference, and Any is a developer preview, so endpoints may change.
+Issues and pull requests are welcome.
