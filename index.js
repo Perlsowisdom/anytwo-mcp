@@ -19,21 +19,32 @@ async function anyRequest(method, path, body) {
   const opts = { method, headers: { "content-type": "application/json" } };
   if (body !== undefined) opts.body = JSON.stringify(body);
 
-  let res;
-  try {
-    res = await fetch(url, opts);
-  } catch (err) {
-    throw new Error(
-      `Could not reach any at ${url} (${err.message}). Is "any run" running on this machine?`
-    );
-  }
+  // A space's search index can be rebuilding (503 index.not_ready). Retry a few times.
+  const maxAttempts = 4;
+  let res, text, data;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(url, opts);
+    } catch (err) {
+      throw new Error(
+        `Could not reach any at ${url} (${err.message}). Is "any run" running on this machine? ` +
+          `Newer builds may listen on 127.0.0.1:2046 instead of 7001; set ANY_API_URL if so.`
+      );
+    }
 
-  const text = await res.text();
-  let data;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { raw: text };
+    text = await res.text();
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+
+    const code = data?.error?.code || data?.code;
+    if (res.status === 503 && code === "index.not_ready" && attempt < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+      continue;
+    }
+    break;
   }
 
   if (!res.ok) {
@@ -62,7 +73,7 @@ const asError = (err) => ({
 
 const server = new McpServer({
   name: "any-mcp",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 function tool(name, description, schema, handler) {
@@ -180,14 +191,28 @@ tool(
 
 tool(
   "any_search",
-  "Full-text/hybrid search over a space's local index.",
+  "Search a space's local index. Title matches come first. Use mode \"title\" to search titles only.",
   {
     spaceId: z.string(),
     query: z.string(),
     limit: z.number().int().positive().max(50).optional(),
+    mode: z
+      .string()
+      .optional()
+      .describe('Search mode: "hybrid", "fts" or "title". Omit for the server default.'),
   },
-  async ({ spaceId, query, limit }) =>
-    asText(await post(`/spaces/${encodeURIComponent(spaceId)}/search`, { query, limit: limit ?? 10 }))
+  async ({ spaceId, query, limit, mode }) => {
+    const body = { query, limit: limit ?? 10 };
+    if (mode) body.mode = mode;
+    return asText(await post(`/spaces/${encodeURIComponent(spaceId)}/search`, body));
+  }
+);
+
+tool(
+  "any_backlinks",
+  "Find objects across all indexed spaces that mention a given identity. Target looks like any://u/<identity>.",
+  { target: z.string().describe("e.g. any://u/<identity>") },
+  async ({ target }) => asText(await get(`/backlinks?target=${encodeURIComponent(target)}`))
 );
 
 // --- Editor (markdown) ---
@@ -227,6 +252,34 @@ tool(
           collection
         )}/markdown`,
         { content }
+      )
+    )
+);
+
+tool(
+  "any_edit_markdown",
+  "Edit part of an object's editor content by find-and-replace. All edits apply or none do. Each oldText must match exactly once unless replaceAll is true.",
+  {
+    spaceId: z.string(),
+    objectId: z.string(),
+    edits: z
+      .array(
+        z.object({
+          oldText: z.string(),
+          newText: z.string(),
+          replaceAll: z.boolean().optional(),
+        })
+      )
+      .min(1),
+    collection: z.string().default("editor_blocks"),
+  },
+  async ({ spaceId, objectId, edits, collection }) =>
+    asText(
+      await patch(
+        `/spaces/${encodeURIComponent(spaceId)}/objects/${encodeURIComponent(objectId)}/editor/${encodeURIComponent(
+          collection
+        )}/markdown`,
+        { edits }
       )
     )
 );
