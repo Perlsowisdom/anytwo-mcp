@@ -104,13 +104,17 @@ machine's loopback address, so your data never leaves your computer.
 
 ### Finding the server
 
-With `ANY_API_URL` unset, the server tries two addresses, in this order, and
-nothing else:
+With `ANY_API_URL` unset, the server looks in these places, in this order, and
+uses the first that answers `/health`:
 
 1. `http://127.0.0.1:31330/v1`, the Any desktop app
 2. `http://127.0.0.1:7001/v1`, a hand-started `any run` (the address used in the
    docs; Any v0.3.3's release notes mention a default of `2046`, so check the
    address `any run` prints)
+3. Windows only: the local port the running `any.exe` is listening on. Some
+   installs of the desktop app pick a different port at every launch. This asks
+   Windows (through PowerShell) about the Any process's own ports; it does not
+   scan other ports.
 
 If yours is somewhere else, set `ANY_API_URL` in the same config entry:
 

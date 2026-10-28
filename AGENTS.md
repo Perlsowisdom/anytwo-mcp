@@ -13,9 +13,10 @@ unofficial.
 
 - A local Any server, through its HTTP API. There is no API key and no hosted
   sign-in. The person owns the data and you are a guest in it.
-- The server is found at `127.0.0.1:31330` (the desktop app), then
-  `127.0.0.1:7001` (a hand-started `any run`), or at `ANY_API_URL`. Do not scan
-  for other ports. If neither answers, the app is probably closed: tell the
+- The MCP server finds Any itself: `ANY_API_URL` if set, otherwise
+  `127.0.0.1:31330` (the desktop app), then `127.0.0.1:7001` (a hand-started
+  `any run`), then, on Windows, the port the running `any.exe` listens on. Do not
+  scan for ports yourself. If none answers, the app is probably closed: tell the
   person.
 - Any process on the person's computer has the same access as the app. Staying
   inside one space is an agreement, not something the server enforces.

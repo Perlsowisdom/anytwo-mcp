@@ -10,6 +10,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 // ---- finding the server -----------------------------------------------------
 // ANY_API_URL wins if set. Otherwise try the two documented local addresses, in
@@ -22,24 +26,62 @@ const CONFIGURED_URL = process.env.ANY_API_URL
 const CANDIDATE_URLS = ["http://127.0.0.1:31330/v1", "http://127.0.0.1:7001/v1"];
 let detectedUrl = null;
 
+async function healthy(url) {
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Windows only, last resort. Some installs of the desktop app start the server on a
+// different port at every launch. Ask the OS which local ports the running any.exe is
+// listening on, and use the first one that answers /health. This looks only at the Any
+// process's own ports; it does not scan.
+async function discoverFromProcess() {
+  if (process.platform !== "win32") return null;
+  const ps =
+    "Get-CimInstance Win32_Process -Filter \"Name='any.exe'\" | " +
+    "Where-Object { $_.CommandLine -match ' run ' } | " +
+    "ForEach-Object { Get-NetTCPConnection -State Listen -OwningProcess $_.ProcessId -ErrorAction SilentlyContinue | " +
+    "Where-Object { $_.LocalAddress -eq '127.0.0.1' } | ForEach-Object { $_.LocalPort } }";
+  try {
+    const { stdout } = await execFileP(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", ps],
+      { timeout: 10000, windowsHide: true }
+    );
+    const ports = stdout.split(/\s+/).filter((s) => /^\d+$/.test(s));
+    for (const p of ports) {
+      const url = `http://127.0.0.1:${p}/v1`;
+      if (await healthy(url)) return url;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
 async function resolveBase() {
   if (CONFIGURED_URL) return CONFIGURED_URL;
   if (detectedUrl) return detectedUrl;
   for (const candidate of CANDIDATE_URLS) {
-    try {
-      const res = await fetch(`${candidate}/health`, { signal: AbortSignal.timeout(1500) });
-      if (res.ok) {
-        detectedUrl = candidate;
-        return candidate;
-      }
-    } catch {
-      // nothing listening at this address
+    if (await healthy(candidate)) {
+      detectedUrl = candidate;
+      return candidate;
     }
+  }
+  const found = await discoverFromProcess();
+  if (found) {
+    detectedUrl = found;
+    return found;
   }
   throw new Error(
     `Could not find a running Any server. Tried ${CANDIDATE_URLS[0]} (the desktop app) and ` +
-      `${CANDIDATE_URLS[1]} (a hand-started "any run"). Open the Any app or start "any run", ` +
-      `or set ANY_API_URL to its address.`
+      `${CANDIDATE_URLS[1]} (a hand-started "any run")` +
+      (process.platform === "win32" ? ", then the port of the running any.exe" : "") +
+      `. Open the Any app or start "any run", or set ANY_API_URL to its address.`
   );
 }
 
