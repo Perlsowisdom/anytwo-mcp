@@ -155,6 +155,9 @@ Each tool is a thin wrapper over one Any HTTP endpoint.
 | `any_object_backlinks` | `GET /spaces/{spaceId}/objects/{objectId}/backlinks` (optional `record`, `dataset`, `prop`, `kind`, `limit`) |
 | `any_list_datasets` | `GET /spaces/{spaceId}/datasets` |
 | `any_query_dataset` | `POST /spaces/{spaceId}/query` with `objectId` and `dataset` |
+| `any_chat_find` | `POST /catalog/general-chat/setup` (finds the space's one chat; creates it if missing) |
+| `any_chat_read` | `POST /spaces/{spaceId}/query` on the chat's `chat_messages`, newest first |
+| `any_chat_send` | `POST /spaces/{spaceId}/objects/{chatId}/chat/messages` as a named agent |
 | `any_read_markdown` | `GET /spaces/{spaceId}/objects/{objectId}/editor/{collection}/markdown` |
 | `any_write_markdown` | `PUT` the same path (replaces the body) |
 | `any_edit_markdown` | `PATCH` the same path with `{edits: [{oldText, newText, replaceAll?}]}` (all or nothing) |
@@ -163,7 +166,13 @@ Each tool is a thin wrapper over one Any HTTP endpoint.
 Creating a page is two steps: `any_create_object` makes the object and returns
 its ID, then `any_write_markdown` or `any_append_markdown` fills in the body.
 
-Not covered yet: chat, files, sharing/ACL, and agent (Bao) configuration. They
+Asking Bao for a brief works through the chat tools, but Bao only answers in a
+space where it has been "seated", and the app has to be open on its active
+device. Any's own `bao_space.py` helper (linked from https://any.org/connect)
+does the seating on your computer. This server only sends and reads messages.
+
+Not covered yet: files, invites and sharing/ACL, editing or deleting chat
+messages, and running or scheduling Bao programs. They
 can be added the same way, one `tool(...)` block each in `index.js`.
 
 ## Troubleshooting
