@@ -1,8 +1,9 @@
 # anytwo-mcp
 
 A local [MCP](https://modelcontextprotocol.io) server that lets Claude read and
-write your **Any** database (the new backend behind Anytwo) through Any's HTTP
-API on `http://127.0.0.1:7001/v1`.
+write your **Any** database (the new backend behind Anytwo) through Any's local
+HTTP API. It is unofficial: Any's own guide says the server has no MCP endpoint,
+so this wraps the HTTP API instead.
 
 It is a single-file Node.js stdio server (`index.js`). It only talks to your own
 machine's loopback address, so your data never leaves your computer.
@@ -34,7 +35,10 @@ machine's loopback address, so your data never leaves your computer.
    npm install
    ```
 
-3. **Start Any** in its own terminal window and leave it running:
+3. **Have Any running.** With the Any desktop app, open it and sign in; that is
+   all you need. If you use the standalone `any` binary instead, start it in its
+   own terminal window and leave it running. Don't run both on the same account:
+   a second server fails with `409 auth.account_in_use`.
 
    ```sh
    any run
@@ -98,12 +102,17 @@ machine's loopback address, so your data never leaves your computer.
 7. **Check it works.** In a new chat, ask Claude to run `any_health`, or to
    list your Any spaces. If `any run` is going, you should get a response.
 
-### Using a different host or port
+### Finding the server
 
-This server defaults to `http://127.0.0.1:7001/v1`. Any v0.3.3 changed the
-server's own default listen address to `127.0.0.1:2046`, and the docs still say
-7001, so check which one yours uses (`any status`). If Any is not on 7001, set
-`ANY_API_URL` in the same config entry:
+With `ANY_API_URL` unset, the server tries two addresses, in this order, and
+nothing else:
+
+1. `http://127.0.0.1:31330/v1`, the Any desktop app
+2. `http://127.0.0.1:7001/v1`, a hand-started `any run` (the address used in the
+   docs; Any v0.3.3's release notes mention a default of `2046`, so check the
+   address `any run` prints)
+
+If yours is somewhere else, set `ANY_API_URL` in the same config entry:
 
 ```json
 "any": {
@@ -116,11 +125,11 @@ server's own default listen address to `127.0.0.1:2046`, and the docs still say
 ## Authentication
 
 There is no API key or token, and none appears in this code. Any's HTTP API
-listens only on loopback, and your identity is the local wallet that
-`any init` created. Anything that can reach `127.0.0.1:7001` on your machine is
-trusted, so:
+listens only on loopback, and your identity is the account the server has open
+(signed in through the app, or created with `any init`). Any process on your
+computer that can reach the server has the same access as the app, so:
 
-- Do not expose port 7001 beyond localhost.
+- Do not expose the server's port beyond localhost.
 - If you point `ANY_API_URL` at a remote host, nothing here protects that traffic.
 - If Any later adds tokens, they would go in the request helper in `index.js`
   and should be read from an environment variable, never hard-coded.
@@ -132,6 +141,7 @@ Each tool is a thin wrapper over one Any HTTP endpoint.
 | Tool | Request |
 | --- | --- |
 | `any_health` | `GET /health` |
+| `any_auth_status` | `GET /auth` (read-only: who is signed in) |
 | `any_list_spaces` | `GET /spaces` (optionally `?status=all`) |
 | `any_create_space` | `POST /spaces` |
 | `any_get_space` | `GET /spaces/{spaceId}` |
@@ -141,7 +151,10 @@ Each tool is a thin wrapper over one Any HTTP endpoint.
 | `any_delete_object` | `DELETE /spaces/{spaceId}/objects/{objectId}` |
 | `any_query_objects` | `POST /spaces/{spaceId}/objects/query` |
 | `any_search` | `POST /spaces/{spaceId}/search` (optional `mode`: `hybrid`, `fts`, `title`) |
-| `any_backlinks` | `GET /backlinks?target=any://u/<identity>` |
+| `any_backlinks` | `GET /backlinks?target=<global any:// URI>` (optional `kind`, `limit`) |
+| `any_object_backlinks` | `GET /spaces/{spaceId}/objects/{objectId}/backlinks` (optional `record`, `dataset`, `prop`, `kind`, `limit`) |
+| `any_list_datasets` | `GET /spaces/{spaceId}/datasets` |
+| `any_query_dataset` | `POST /spaces/{spaceId}/query` with `objectId` and `dataset` |
 | `any_read_markdown` | `GET /spaces/{spaceId}/objects/{objectId}/editor/{collection}/markdown` |
 | `any_write_markdown` | `PUT` the same path (replaces the body) |
 | `any_edit_markdown` | `PATCH` the same path with `{edits: [{oldText, newText, replaceAll?}]}` (all or nothing) |
@@ -162,10 +175,19 @@ can be added the same way, one `tool(...)` block each in `index.js`.
   silently waiting for input; if it prints an error and exits, that error is the
   problem. Claude Desktop's logs are in `%APPDATA%\Claude\logs` on Windows and
   `~/Library/Logs/Claude` on macOS.
-- **"Could not reach any at ..."** means Any is not running or is on another
-  port. Start `any run`, check `any status`, and set `ANY_API_URL` if needed.
+- **"Could not find a running Any server"** means neither the desktop app
+  address nor `7001` answered. Open the Any app (or start `any run`), and set
+  `ANY_API_URL` if yours is on another address.
+- **`401 auth.required`** means nobody is signed in. Open the app and sign in.
 - **An API error such as `any API error 404 ...`** usually means an endpoint
   changed. Compare `index.js` with https://docs.any.org/reference/http-api.html.
+
+## For agents
+
+[`AGENTS.md`](AGENTS.md) holds working rules for an AI agent using this server,
+taken from Any's own guide at https://any.org/connect (read, write and approval
+rules, how to save knowledge, how to handle conflicts). A short version is also
+sent to the client automatically as the server's instructions.
 
 ## Notes
 
@@ -175,9 +197,10 @@ can be added the same way, one `tool(...)` block each in `index.js`.
 
 ## Status
 
-Early. `any_health` has been confirmed against a live Any v0.3.3 server; the
-other tools were written from the HTTP API reference and have not all been
-exercised yet. Any is a developer preview, so endpoints may change. Calls that
-hit `503 index.not_ready` (a space's search index rebuilding) are retried
-automatically.
+Early. `any_health` has been confirmed against a live Any v0.3.3 server. The
+other tools were written from the HTTP API reference (checked again on 28
+October 2026) and tested only against a mock server, not the real one. Any is a
+developer preview, so endpoints may change. Reads and searches that hit
+`503 index.not_ready` (a space's search index rebuilding) are retried
+automatically. Writes are never retried.
 Issues and pull requests are welcome.
